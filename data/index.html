@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Pumpkin Lights</title>
+  <style>
+    body { font-family: sans-serif; text-align: center; padding: 1.5em;
+           background: #1a1a1a; color: #ff8c1a; }
+    button { font-size: 1.2em; padding: 0.6em 1.2em; border-radius: 8px;
+             border: 2px solid #ff8c1a; background: #ff8c1a; color: #1a1a1a; }
+    .mode { background: transparent; color: #ff8c1a; margin: 0.3em; }
+    .mode.active { background: #ff8c1a; color: #1a1a1a; }
+    .swatch { width: 2.4em; height: 2.4em; padding: 0; margin: 0.2em;
+              border-radius: 50%; border: 2px solid #ff8c1a; font-size: 1em; }
+    input[type=range] { width: 80%; }
+    input[type=color] { width: 5em; height: 3em; border: none; }
+    .led { margin: 1em auto; padding: 0.8em; max-width: 22em;
+           border: 1px solid #5a3300; border-radius: 10px; }
+    #status { min-height: 1.5em; font-style: italic; }
+  </style>
+</head>
+<body>
+  <h1>🎃 Pumpkin Lights 🎃</h1>
+
+  <button id="powerBtn" onclick="togglePower()">...</button>
+
+  <p>Brightness: <span id="bval"></span></p>
+  <input type="range" id="bright" min="0" max="255" oninput="setBrightness(this.value)">
+
+  <h2>Light Shows</h2>
+  <p id="status"></p>
+  <div id="modes"></div>
+
+  <h2>Individual Lights</h2>
+  <div id="leds"></div>
+
+  <script>
+    // Names for the 4 modes (0 = your own colors, 1-3 = light shows)
+    const MODE_NAMES = ['🎨 My Colors', '🌈 Rainbow Roll', '🕯️ Candle Flicker', '🟣 Spooky Chase'];
+
+    // Quick-pick colors shown under each light's color picker.
+    // To add another one, add a new line to this list.
+    // (label is optional text shown on the swatch)
+    const PRESET_COLORS = [
+      { name: 'Halloween Orange', hex: '#ff6400', label: '🎃' },
+      { name: 'Red',              hex: '#ff0000' },
+      { name: 'Yellow',           hex: '#ffc800' },
+      { name: 'Green',            hex: '#00ff00' },
+      { name: 'Blue',             hex: '#0000ff' },
+      { name: 'Purple',           hex: '#a000ff' },
+      { name: 'White',            hex: '#ffffff' }
+    ];
+
+    let isOn = true;
+    let timer = null;
+
+    // Wait until the user stops moving a control, then send one request
+    function sendSoon(url) {
+      clearTimeout(timer);
+      timer = setTimeout(() => fetch(url).then(refresh), 80);
+    }
+
+    function showPower() {
+      document.getElementById('powerBtn').textContent = isOn ? 'Turn OFF' : 'Turn ON';
+    }
+
+    function togglePower() {
+      isOn = !isOn;
+      showPower();
+      fetch('/power?on=' + (isOn ? 1 : 0)).then(refresh);
+    }
+
+    function setBrightness(value) {
+      document.getElementById('bval').textContent = value;
+      sendSoon('/brightness?value=' + value);
+    }
+
+    function setMode(m) {
+      fetch('/mode?value=' + m).then(refresh);
+    }
+
+    function setColor(led, hex) {
+      // Turn "#ff6400" into three numbers: red, green, blue
+      const r = parseInt(hex.substr(1, 2), 16);
+      const g = parseInt(hex.substr(3, 2), 16);
+      const b = parseInt(hex.substr(5, 2), 16);
+      showMode({ auto: false, mode: 0 });   // picking a color = "My Colors" mode
+      sendSoon('/color?led=' + led + '&r=' + r + '&g=' + g + '&b=' + b);
+    }
+
+    // Tapping a preset swatch: move the color picker, then send the color
+    function usePreset(led, hex) {
+      document.getElementById('col' + led).value = hex;
+      setColor(led, hex);
+    }
+
+    function blinkText(rate) {
+      if (rate == 0) return 'Steady';
+      return rate + (rate == 1 ? ' blink/sec' : ' blinks/sec');
+    }
+
+    function setBlink(led, rate) {
+      document.getElementById('bl' + led).textContent = blinkText(rate);
+      showMode({ auto: false, mode: 0 });   // blinking only works in "My Colors" mode
+      sendSoon('/blink?led=' + led + '&rate=' + rate);
+    }
+
+    // Build the row of preset swatches for one light
+    function presetButtons(led) {
+      let html = '';
+      PRESET_COLORS.forEach(p => {
+        html += '<button class="swatch" title="' + p.name + '" ' +
+                'style="background:' + p.hex + '" ' +
+                'onclick="usePreset(' + led + ', \'' + p.hex + '\')">' +
+                (p.label || '') + '</button>';
+      });
+      return html;
+    }
+
+    // Highlight the active mode button and show the auto-mode message
+    function showMode(state) {
+      const status = document.getElementById('status');
+      if (state.auto) {
+        status.textContent = 'Auto show: ' + MODE_NAMES[state.showing] +
+                             ' (touch any control to take over)';
+      } else {
+        status.textContent = '';
+      }
+      document.querySelectorAll('.mode').forEach((btn, i) => {
+        btn.classList.toggle('active', !state.auto && i === state.mode);
+      });
+    }
+
+    // Ask the ESP32 what it is doing now (the page does this every 2 seconds)
+    function refresh() {
+      fetch('/state').then(r => r.json()).then(state => {
+        isOn = state.on;
+        showPower();
+        showMode(state);
+      });
+    }
+
+    // On page load: build the controls using the ESP32's current settings
+    fetch('/state').then(r => r.json()).then(state => {
+      document.getElementById('bright').value = state.brightness;
+      document.getElementById('bval').textContent = state.brightness;
+
+      let modeHtml = '';
+      MODE_NAMES.forEach((name, i) => {
+        modeHtml += '<button class="mode" onclick="setMode(' + i + ')">' + name + '</button>';
+      });
+      document.getElementById('modes').innerHTML = modeHtml;
+
+      let ledHtml = '';
+      state.colors.forEach((hex, i) => {
+        ledHtml += '<div class="led"><b>LED ' + (i + 1) + '</b><br>' +
+          '<input type="color" id="col' + i + '" value="' + hex + '" ' +
+          'oninput="setColor(' + i + ', this.value)"><br>' +
+          '<div>' + presetButtons(i) + '</div>' +
+          'Blink: <span id="bl' + i + '">' + blinkText(state.blink[i]) + '</span><br>' +
+          '<input type="range" min="0" max="20" value="' + state.blink[i] + '" ' +
+          'oninput="setBlink(' + i + ', this.value)"></div>';
+      });
+      document.getElementById('leds').innerHTML = ledHtml;
+
+      isOn = state.on;
+      showPower();
+      showMode(state);
+    });
+
+    setInterval(refresh, 2000);
+  </script>
+</body>
+</html>
