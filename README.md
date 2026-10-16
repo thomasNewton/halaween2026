@@ -69,4 +69,7 @@ Reload the page. If that doesn't help, ask an adult to unplug the pumpkin and pl
 | `data/index.html` | The control page you see on your phone |
 | `platformio.ini` | Settings for the tools used to load the program onto the chip |
 
+
+Curious how it works? See [How it works](docs/HOW_THE_CODE_WORKS.md)
+
 Happy Halloween! 🎃
